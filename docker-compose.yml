@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  db-tickets:
+    image: postgres:15
+    container_name: ms_tickets_db
+    environment:
+      POSTGRES_USER: u_tickets
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: travel_tickets
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  api-tickets:
+    build: .
+    container_name: ms_tickets_api
+    depends_on:
+      - db-tickets
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=db-tickets 
+
+networks:
+  default:
+    name: tickets-network
