@@ -1,89 +1,92 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from datetime import datetime
+import os
 
-app = FastAPI(title="Microservicio de Tickets (CRUD)")
-
-DB_CONFIG = {
-    "host": "db-tickets",
-    "database": "travel_tickets",
-    "user": "u_tickets",
-    "password": "password123"
-}
-
-class Vuelo(BaseModel):
-    numero_vuelo: str
-    id_destino: int
-    aerolinea: str
-    precio_base: float
-    fecha_salida: datetime
-    capacidad_total: int
-    asientos_disponibles: int
-    modelo_avion: str
+app = FastAPI(title="API de Tickets - Filtros de Precio y Disponibilidad")
 
 def get_db_connection():
-    return psycopg2.connect(**DB_CONFIG)
-
-@app.post("/vuelos", status_code=status.HTTP_201_CREATED)
-def create_vuelo(vuelo: Vuelo):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            """INSERT INTO vuelos (numero_vuelo, id_destino, aerolinea, precio_base, 
-               fecha_salida, capacidad_total, asientos_disponibles, modelo_avion) 
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id_vuelo""",
-            (vuelo.numero_vuelo, vuelo.id_destino, vuelo.aerolinea, vuelo.precio_base, 
-             vuelo.fecha_salida, vuelo.capacidad_total, vuelo.asientos_disponibles, vuelo.modelo_avion)
-        )
-        new_id = cur.fetchone()[0]
-        conn.commit()
-        return {"id_vuelo": new_id, "message": "Vuelo creado exitosamente"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        cur.close()
-        conn.close()
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST", "db-tickets"),
+        database=os.getenv("POSTGRES_DB", "travel_tickets"),
+        user=os.getenv("POSTGRES_USER", "u_tickets"),
+        password=os.getenv("POSTGRES_PASSWORD", "password123"),
+        cursor_factory=RealDictCursor
+    )
 
 @app.get("/vuelos")
-def get_vuelos(limit: int = 100):
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT * FROM vuelos LIMIT %s", (limit,))
-    results = cur.fetchall()
-    cur.close()
-    conn.close()
-    return results
-
-@app.put("/vuelos/{vuelo_id}")
-def update_vuelo(vuelo_id: int, vuelo: Vuelo):
+def listar_vuelos(
+    page: int = Query(1, ge=1),
+    size: int = Query(10, ge=1, le=100),
+    destino: Optional[str] = Query(None, description="Nombre del destino"),
+    aerolinea: Optional[str] = Query(None, description="Nombre de la aerolínea"),
+    fecha: Optional[str] = Query(None, description="Fecha de salida (YYYY-MM-DD)"),
+    precio_min: Optional[float] = Query(None, ge=0, description="Precio mínimo"),
+    precio_max: Optional[float] = Query(None, ge=0, description="Precio máximo"),
+    solo_disponibles: bool = Query(True, description="Mostrar solo vuelos con asientos libres")
+):
+    offset = (page - 1) * size
     conn = get_db_connection()
     cur = conn.cursor()
+    
     try:
-        cur.execute(
-            """UPDATE vuelos SET numero_vuelo=%s, precio_base=%s, asientos_disponibles=%s 
-               WHERE id_vuelo=%s""",
-            (vuelo.numero_vuelo, vuelo.precio_base, vuelo.asientos_disponibles, vuelo_id)
-        )
-        conn.commit()
-        return {"message": "Vuelo actualizado correctamente"}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        where_clauses = []
+        params = []
+
+        if solo_disponibles:
+            where_clauses.append("v.asientos_disponibles > 0")
+
+        if destino:
+            where_clauses.append("d.nombre_destino ILIKE %s")
+            params.append(f"%{destino}%")
+        
+        if aerolinea:
+            where_clauses.append("v.aerolinea ILIKE %s")
+            params.append(f"%{aerolinea}%")
+        
+        if fecha:
+            where_clauses.append("v.fecha_salida::date = %s")
+            params.append(fecha)
+
+        if precio_min is not None:
+            where_clauses.append("v.precio_base >= %s")
+            params.append(precio_min)
+        
+        if precio_max is not None:
+            where_clauses.append("v.precio_base <= %s")
+            params.append(precio_max)
+
+        where_str = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+        query = f"""
+            SELECT v.*, d.nombre_destino, d.pais 
+            FROM vuelos v
+            JOIN destinos d ON v.id_destino = d.id_destino
+            {where_str}
+            ORDER BY v.precio_base ASC
+            LIMIT %s OFFSET %s
+        """
+        cur.execute(query, params + [size, offset])
+        vuelos = cur.fetchall()
+
+        count_query = f"""
+            SELECT COUNT(*) 
+            FROM vuelos v
+            JOIN destinos d ON v.id_destino = d.id_destino
+            {where_str}
+        """
+        cur.execute(count_query, params)
+        total_records = cur.fetchone()['count']
+
+        return {
+            "items": vuelos,
+            "total": total_records,
+            "page": page,
+            "size": size,
+            "pages": (total_records + size - 1) // size if total_records > 0 else 0
+        }
     finally:
         cur.close()
         conn.close()
-
-@app.delete("/vuelos/{vuelo_id}")
-def delete_vuelo(vuelo_id: int):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM vuelos WHERE id_vuelo = %s", (vuelo_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return {"message": "Vuelo eliminado"}
