@@ -9,10 +9,11 @@ app = FastAPI(title="API de Tickets - Filtros de Precio y Disponibilidad")
 
 def get_db_connection():
     return psycopg2.connect(
-        host=os.getenv("DB_HOST", "db-tickets"),
-        database=os.getenv("POSTGRES_DB", "travel_tickets"),
-        user=os.getenv("POSTGRES_USER", "u_tickets"),
-        password=os.getenv("POSTGRES_PASSWORD", "password123"),
+        host=os.getenv("DB_HOST"),
+        database=os.getenv("POSTGRES_DB"),
+        user=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_PASSWORD"),
+        port=os.getenv("POSTGRES_PORT", "5432"),
         cursor_factory=RealDictCursor
     )
 
