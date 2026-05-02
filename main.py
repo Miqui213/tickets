@@ -7,7 +7,6 @@ import os
 
 app = FastAPI(title="API de Tickets - CRUD Completo")
 
-# Esquema para creación y actualización
 class VueloSchema(BaseModel):
     numero_vuelo: str
     id_destino: int
@@ -94,7 +93,7 @@ def listar_vuelos(
     finally:
         cur.close()
         conn.close()
-
+        
 @app.get("/vuelos/{id_vuelo}")
 def obtener_vuelo_por_id(id_vuelo: int):
     conn = get_db_connection()
@@ -141,6 +140,50 @@ def eliminar_vuelo(id_vuelo: int):
         cur.execute("DELETE FROM vuelos WHERE id_vuelo = %s", (id_vuelo,))
         conn.commit()
         return {"mensaje": "Vuelo eliminado"}
+    finally:
+        cur.close()
+        conn.close()
+
+    """
+    ----------------------------------------------------------------------------------
+    Endpoints exclusivos para Data Science.
+    -----------------------------------------------------------------------------------
+    """
+
+@app.get("/vuelos/all")
+def obtener_todos_los_vuelos_raw():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT * FROM vuelos ORDER BY id_vuelo ASC")
+        vuelos = cur.fetchall()
+        
+        return {
+            "total_registros": len(vuelos),
+            "data": vuelos
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+        
+        
+@app.get("/destinos/all")
+def obtener_todos_los_destinos():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT * FROM destinos ORDER BY nombre_destino ASC")
+        destinos = cur.fetchall()
+        
+        return {
+            "total_destinos": len(destinos),
+            "data": destinos
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
         conn.close()
